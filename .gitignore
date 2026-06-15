@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+release/
+
+# Electron build artifacts
+*.dmg
+*.AppImage
+*.exe
+*.zip
+*.tar.gz
+
+# Local database and state
+*.db
+*.sqlite
+data/
+
+# Environment / secrets
+.env
+.env.*
+slack-mirror.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Logs
+*.log
+npm-debug.log*
+
+# CLI output artifacts
+out.txt

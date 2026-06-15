@@ -1,0 +1,31 @@
+{
+  "name": "daily-tracker",
+  "version": "1.0.0",
+  "description": "Daily todo, calendar, and PR review tracker",
+  "main": "main.js",
+  "scripts": {
+    "dev:renderer": "vite",
+    "dev:electron": "NODE_ENV=development electron .",
+    "dev": "concurrently -k -n VITE,ELECTRON -c cyan,magenta \"npm run dev:renderer\" \"sleep 2 && npm run dev:electron\"",
+    "build": "vite build",
+    "start": "npm run build && electron ."
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^9.2.1",
+    "electron": "^34.0.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.11"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.8.0",
+    "bootstrap": "^5.3.8",
+    "griddy-icons": "^0.2.0",
+    "react": "^19.2.6",
+    "react-bootstrap": "^2.10.10",
+    "react-dom": "^19.2.6"
+  }
+}

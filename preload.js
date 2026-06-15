@@ -1,0 +1,28 @@
+const { contextBridge, ipcRenderer } = require('electron')
+
+contextBridge.exposeInMainWorld('tracker', {
+  readTodos:       ()                    => ipcRenderer.invoke('read-todos'),
+  writeTodos:      (todos)               => ipcRenderer.invoke('write-todos', todos),
+  readHistory:     ()                    => ipcRenderer.invoke('read-history'),
+  fetchICSRange:   (startStr, endStr)    => ipcRenderer.invoke('fetch-ics-range', startStr, endStr),
+  readNotes:       ()                    => ipcRenderer.invoke('read-notes'),
+  writeNote:       (dateStr, text)       => ipcRenderer.invoke('write-note', dateStr, text),
+  fetchJiraSprint: ()                    => ipcRenderer.invoke('fetch-jira-sprint'),
+  fetchGithub:     ()                    => ipcRenderer.invoke('fetch-github'),
+  fetchSentry:     (flags)               => ipcRenderer.invoke('fetch-sentry', flags),
+  fetchSentryIssue:   (tag)                        => ipcRenderer.invoke('fetch-sentry-issue', tag),
+  openSentryIssue:    (tag)                        => ipcRenderer.invoke('open-sentry-issue', tag),
+  runSentrySkill:     (tag, skillName, command)    => ipcRenderer.invoke('run-sentry-skill', tag, skillName, command),
+  getSentrySkillRuns: (tag)                        => ipcRenderer.invoke('get-sentry-skill-runs', tag),
+  openUrl:         (url)                 => ipcRenderer.invoke('open-url', url),
+  onFileChanged:   (cb)                  => ipcRenderer.on('file-changed', cb),
+  fetchReviewPrs:  ()                    => ipcRenderer.invoke('fetch-review-prs'),
+  getPrReview:          (prUrl)              => ipcRenderer.invoke('get-pr-review', prUrl),
+  runPrReview:          (prUrl, jiraKey)     => ipcRenderer.invoke('run-pr-review', prUrl, jiraKey),
+  postPrReviewComment:  (number, repo, body) => ipcRenderer.invoke('post-pr-review-comment', number, repo, body),
+  markPrCommented:      (prUrl)              => ipcRenderer.invoke('mark-pr-commented', prUrl),
+  getCommentedPrUrls:   ()                   => ipcRenderer.invoke('get-commented-pr-urls'),
+  getSetting:      (key)                 => ipcRenderer.invoke('get-setting', key),
+  setSetting:      (key, value)          => ipcRenderer.invoke('set-setting', key, value),
+  archivePastDone: (todayStr)            => ipcRenderer.invoke('archive-past-done', todayStr),
+})
