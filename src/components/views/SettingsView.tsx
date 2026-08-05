@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import type { AlertMode, ThemeId, SentryPreset, SentrySkill } from '../../types/tracker'
+import type { AlertMode, ThemeId, SentryPreset, SentrySkill, JiraFilter } from '../../types/tracker'
 
 interface IcsCalendar {
   url:      string
@@ -52,6 +52,12 @@ export default function SettingsView({ alertMode, onAlertModeChange, theme, onTh
   const [jiraProjectKey,   setJiraProjectKey]   = useState('')
   const [jiraSaved,        setJiraSaved]        = useState(false)
   const [jiraSaveFlash,    setJiraSaveFlash]    = useState(false)
+  const [jiraFilters,      setJiraFilters]      = useState<JiraFilter[]>([])
+  const [newFilterName,    setNewFilterName]    = useState('')
+  const [newFilterUrl,     setNewFilterUrl]     = useState('')
+  const [editingFilterIdx, setEditingFilterIdx] = useState<number | null>(null)
+  const [editFilterName,   setEditFilterName]   = useState('')
+  const [editFilterUrl,    setEditFilterUrl]    = useState('')
   const [reviewSkill,      setReviewSkill]      = useState('')
   const [skillSaved,       setSkillSaved]       = useState(false)
 
@@ -78,6 +84,13 @@ export default function SettingsView({ alertMode, onAlertModeChange, theme, onTh
       if (e) setJiraEmail(e)
       if (t) setJiraToken(t)
       if (p) setJiraProjectKey(p)
+    })
+    window.tracker.getSetting('jira_filters').then(v => {
+      if (!v) return
+      try {
+        const parsed = JSON.parse(v)
+        if (Array.isArray(parsed)) setJiraFilters(parsed)
+      } catch {}
     })
     window.tracker.getSetting('review_skill').then(v => {
       if (v) { setReviewSkill(v); setSkillSaved(true) }
@@ -244,6 +257,53 @@ export default function SettingsView({ alertMode, onAlertModeChange, theme, onTh
     await window.tracker.setSetting('sentry_claude_skills', JSON.stringify(next))
   }
 
+  // ── Jira filter handlers ────────────────────────────────────────────────
+  async function addJiraFilter() {
+    const name = newFilterName.trim()
+    const url  = newFilterUrl.trim()
+    if (!name) { alert('Enter a filter name'); return }
+    if (!url || !/^https?:\/\/.+[?&]filter=\d+/.test(url)) {
+      alert('Enter a valid filter URL (e.g. https://company.atlassian.net/issues?filter=12345)')
+      return
+    }
+    if (jiraFilters.some(f => f.name === name)) { alert('A filter with that name already exists'); return }
+    const next = [...jiraFilters, { name, url }]
+    setJiraFilters(next)
+    setNewFilterName('')
+    setNewFilterUrl('')
+    await window.tracker.setSetting('jira_filters', JSON.stringify(next))
+  }
+
+  async function removeJiraFilter(idx: number) {
+    const next = jiraFilters.filter((_, i) => i !== idx)
+    setJiraFilters(next)
+    await window.tracker.setSetting('jira_filters', JSON.stringify(next))
+  }
+
+  function startEditJiraFilter(idx: number) {
+    setEditingFilterIdx(idx)
+    setEditFilterName(jiraFilters[idx].name)
+    setEditFilterUrl(jiraFilters[idx].url)
+  }
+
+  async function saveEditJiraFilter(idx: number) {
+    const name = editFilterName.trim()
+    const url  = editFilterUrl.trim()
+    if (!name) { alert('Enter a filter name'); return }
+    if (!url || !/^https?:\/\/.+[?&]filter=\d+/.test(url)) {
+      alert('Enter a valid filter URL (e.g. https://company.atlassian.net/issues?filter=12345)')
+      return
+    }
+    const next = jiraFilters.map((f, i) => i === idx ? { name, url } : f)
+    setJiraFilters(next)
+    setEditingFilterIdx(null)
+    await window.tracker.setSetting('jira_filters', JSON.stringify(next))
+  }
+
+  function cancelEditJiraFilter() {
+    setEditingFilterIdx(null)
+  }
+
   // ── Jira / Claude handlers ───────────────────────────────────────────────
   async function saveSkill() {
     const val = reviewSkill.trim()
@@ -340,7 +400,7 @@ export default function SettingsView({ alertMode, onAlertModeChange, theme, onTh
           </>}
 
           {/* ── Jira ── */}
-          {activeTab === 'jira' && (
+          {activeTab === 'jira' && <>
             <div className="settings-section">
               <div className="settings-section-title">Jira</div>
               <div className="settings-row">
@@ -405,7 +465,78 @@ export default function SettingsView({ alertMode, onAlertModeChange, theme, onTh
                 </div>
               </div>
             </div>
-          )}
+
+            <div className="settings-section">
+              <div className="settings-section-title">Saved Filters</div>
+              <div className="settings-hint" style={{ marginBottom: 10 }}>
+                Add Jira filter URLs to use in the Filters view on the Jira tab.
+              </div>
+
+              {jiraFilters.length > 0 && (
+                <div className="sentry-preset-list">
+                  {jiraFilters.map((filter, i) =>
+                    editingFilterIdx === i ? (
+                      <div key={i} className="sentry-preset-row jira-filter-editing">
+                        <div className="jira-filter-edit-fields">
+                          <input
+                            className="settings-input"
+                            type="text"
+                            value={editFilterName}
+                            onChange={e => setEditFilterName(e.target.value)}
+                            autoComplete="off"
+                            spellCheck={false}
+                          />
+                          <input
+                            className="settings-input"
+                            type="text"
+                            value={editFilterUrl}
+                            onChange={e => setEditFilterUrl(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') saveEditJiraFilter(i) }}
+                            autoComplete="off"
+                            spellCheck={false}
+                          />
+                        </div>
+                        <button className="settings-save-btn" onClick={() => saveEditJiraFilter(i)}>Save</button>
+                        <button className="sentry-preset-remove" onClick={cancelEditJiraFilter} aria-label="Cancel edit">✕</button>
+                      </div>
+                    ) : (
+                      <div key={i} className="sentry-preset-row">
+                        <div className="sentry-preset-info">
+                          <span className="sentry-preset-name">{filter.name}</span>
+                          <span className="sentry-preset-flags">{filter.url}</span>
+                        </div>
+                        <button className="jira-filter-edit-btn" onClick={() => startEditJiraFilter(i)} aria-label={`Edit ${filter.name}`}>Edit</button>
+                        <button className="sentry-preset-remove" onClick={() => removeJiraFilter(i)} aria-label={`Remove ${filter.name}`}>×</button>
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
+
+              <div className="sentry-preset-add">
+                <input
+                  className="settings-input"
+                  type="text"
+                  placeholder="Filter name"
+                  value={newFilterName}
+                  onChange={e => setNewFilterName(e.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <input
+                  className="settings-input"
+                  type="text"
+                  placeholder="https://company.atlassian.net/issues?filter=12345"
+                  value={newFilterUrl}
+                  onChange={e => setNewFilterUrl(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') addJiraFilter() }}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <button className="settings-save-btn" onClick={addJiraFilter}>Add</button>
+              </div>
+            </div>
+          </>}
 
           {/* ── Sentry ── */}
           {activeTab === 'sentry' && <>

@@ -699,6 +699,43 @@ ipcMain.handle('fetch-jira-sprint', async () => {
   }
 })
 
+ipcMain.handle('fetch-jira-filter-issues', async (_e, filterId, nextPageToken) => {
+  const { domain, email, token } = getJiraCreds()
+  if (!domain || !email || !token || domain.startsWith('<')) return { issues: [], error: 'not_configured' }
+  if (!filterId) return { issues: [], error: 'No filter ID provided' }
+
+  const auth    = Buffer.from(`${email}:${token}`).toString('base64')
+  const headers = { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json' }
+
+  const tenant = await makeHttpsGet(`https://${domain}/_edge/tenant_info`)
+  if (!tenant?.cloudId) return { issues: [], error: 'Could not resolve cloud ID from ' + domain }
+
+  const cloudId = tenant.cloudId
+  const url     = `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search/jql`
+
+  const body = {
+    jql:        `filter = ${filterId} ORDER BY updated DESC`,
+    fields:     ['summary', 'status', 'assignee'],
+    maxResults: 50,
+    ...(nextPageToken ? { nextPageToken } : {}),
+  }
+
+  const data = await makeHttpsPost(url, headers, body)
+  if (!data)        return { issues: [], error: 'fetch_failed' }
+  if (!data.issues) return { issues: [], error: data.errorMessages?.[0] || JSON.stringify(data)?.slice(0, 200) }
+
+  return {
+    issues: data.issues.map(i => ({
+      key:      i.key,
+      title:    i.fields.summary,
+      status:   i.fields.status.name,
+      assignee: i.fields.assignee?.displayName ?? null,
+      url:      `https://${domain}/browse/${i.key}`,
+    })),
+    nextPageToken: data.nextPageToken ?? null,
+  }
+})
+
 // ── GitHub microservice client ─────────────────────────────────────────────────
 // Forks github-service.js once; sends typed messages; resolves by message id.
 let _ghService = null
@@ -1029,6 +1066,15 @@ ipcMain.handle('get-commented-pr-urls', () => {
     const rows = db.prepare('SELECT pr_url FROM pr_commented').all()
     return rows.map(r => r.pr_url)
   } catch (e) { console.error('[db] get-commented-pr-urls:', e); return [] }
+})
+
+ipcMain.handle('get-commented-pr-count-today', () => {
+  try {
+    const row = db.prepare(
+      "SELECT COUNT(*) as count FROM pr_commented WHERE created >= CAST(strftime('%s', 'now', 'localtime', 'start of day') AS INTEGER)"
+    ).get()
+    return row ? row.count : 0
+  } catch (e) { console.error('[db] get-commented-pr-count-today:', e); return 0 }
 })
 
 ipcMain.handle('get-pr-review', (_e, prUrl) => {

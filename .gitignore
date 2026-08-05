@@ -17,6 +17,7 @@ release/
 *.db
 *.sqlite
 data/
+docs/
 
 # Environment / secrets
 .env
@@ -30,6 +31,7 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+.claude/
 *.swp
 *~
 

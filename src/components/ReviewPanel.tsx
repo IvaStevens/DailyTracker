@@ -11,7 +11,7 @@ const REVIEW_SECTION_MAP: Record<string, string> = {
   'suggestion':   'Suggestion',
 }
 
-function parseReviewIssues(text: string): ReviewIssue[] {
+export function parseReviewIssues(text: string): ReviewIssue[] {
   const issues: ReviewIssue[] = []
   let currentSection = 'Issue'
   let idx = 0

@@ -18,10 +18,16 @@ export interface HistoryDay {
 }
 
 export interface JiraIssue {
-  key:    string
-  title:  string
-  status: string
-  url:    string
+  key:      string
+  title:    string
+  status:   string
+  url:      string
+  assignee?: string | null
+}
+
+export interface JiraFilter {
+  name: string
+  url:  string   // e.g. https://company.atlassian.net/issues?filter=12345
 }
 
 export interface PR {
@@ -112,7 +118,8 @@ declare global {
       fetchICSRange:        (start: string, end: string)  => Promise<Record<string, Meeting[]>>
       readNotes:            ()                             => Promise<Record<string, string>>
       writeNote:            (date: string, text: string)  => Promise<boolean>
-      fetchJiraSprint:      ()                             => Promise<{ issues?: JiraIssue[]; error?: string }>
+      fetchJiraSprint:           ()                                              => Promise<{ issues?: JiraIssue[]; error?: string }>
+      fetchJiraFilterIssues:     (filterId: string, nextPageToken: string | null) => Promise<{ issues?: JiraIssue[]; nextPageToken?: string | null; error?: string }>
       fetchGithub:          ()                             => Promise<{ myPRs?: PR[]; reviews?: PR[]; openPRs?: PR[]; error?: string | null }>
       fetchSentry:          (flags?: string)                => Promise<{ projects?: SentryProjectResult[]; error?: string | null }>
       fetchSentryIssue:     (tag: string)                  => Promise<{ detail?: IssueDetail; error?: string }>
@@ -124,8 +131,9 @@ declare global {
       getPrReview:          (prUrl: string)                => Promise<string | null>
       runPrReview:          (prUrl: string, jiraKey: string | null) => Promise<{ review?: string; error?: string }>
       postPrReviewComment:  (number: number, repo: string, body: string) => Promise<{ error?: string }>
-      markPrCommented:      (prUrl: string)  => Promise<boolean>
-      getCommentedPrUrls:   ()               => Promise<string[]>
+      markPrCommented:         (prUrl: string)  => Promise<boolean>
+      getCommentedPrUrls:      ()               => Promise<string[]>
+      getCommentedPrCountToday: ()              => Promise<number>
       getSetting:           (key: string)                  => Promise<string | null>
       setSetting:           (key: string, value: string)   => Promise<boolean>
       archivePastDone:      (todayStr: string)             => Promise<boolean>
