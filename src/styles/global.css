@@ -2257,6 +2257,31 @@ body {
   align-items:           center;
 }
 
+/* ── Watchdog schedule builder ────────────────────────────────────────────── */
+.watchdog-add {
+  display:     flex;
+  flex-wrap:   wrap;
+  gap:         6px;
+  align-items: center;
+}
+.watchdog-days { display: flex; gap: 4px; }
+.watchdog-day {
+  background:    var(--surface-2);
+  border:        1px solid var(--border);
+  border-radius: 6px;
+  color:         var(--text-dim);
+  font-size:     11.5px;
+  font-family:   inherit;
+  padding:       4px 8px;
+  cursor:        pointer;
+  transition:    border-color 0.15s, color 0.15s, background 0.15s;
+}
+.watchdog-day:hover  { border-color: var(--teal); }
+.watchdog-day.active { background: var(--teal-dim); border-color: var(--teal); color: var(--teal); }
+.watchdog-day-input  { flex: 0 0 64px; }
+.watchdog-time-input { flex: 0 0 110px; color-scheme: dark; }
+.settings-save-btn:disabled { opacity: 0.4; cursor: default; }
+
 /* ── Sentry issue detail cards ────────────────────────────────────────────── */
 .sentry-detail-card {
   background: var(--surface-2);

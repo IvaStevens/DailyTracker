@@ -7,8 +7,9 @@ const https    = require('https')
 const os       = require('os')
 const { fork, spawn } = require('child_process')
 const Database = require('better-sqlite3')
+const watchdog = require('./watchdog-service')
 
-const STATE_DIR  = path.join(__dirname, 'data')
+const STATE_DIR = path.join(__dirname, 'data')
 const HIST_FILE  = path.join(STATE_DIR, 'history.json')
 const TODOS_FILE = path.join(STATE_DIR, 'todos.json')   // Slack sync inbox (read-only for app)
 const NOTES_FILE = path.join(STATE_DIR, 'notes.json')   // legacy — migrated on first run
@@ -1167,6 +1168,72 @@ ipcMain.handle('get-sentry-skill-runs', (_e, tag) => {
   } catch (e) { console.error('[db] get-sentry-skill-runs:', e); return {} }
 })
 
+// ── Claude watchdog ───────────────────────────────────────────────────────────
+// Opens a terminal on a user-defined schedule, sends the configured message to
+// Claude Code, and lets the session end. Message and schedules live in settings.
+const WATCHDOG_TICK_MS  = 30 * 1000
+const WATCHDOG_GRACE_MS = 15 * 60 * 1000   // still fire if the app was asleep/busy at the exact minute
+
+function readJsonSetting(key, fallback) {
+  try {
+    const raw = readSetting(key)
+    return raw ? JSON.parse(raw) : fallback
+  } catch (_) { return fallback }
+}
+
+function writeSetting(key, value) {
+  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, String(value))
+}
+
+async function fireWatchdog() {
+  const message = readSetting('watchdog_message').trim()
+  if (!message) return { error: 'No watchdog message configured — add one in Settings.' }
+  const claudeExec = await getClaudePath()
+  const res = await watchdog.launchClaudeInTerminal(claudeExec, message)
+  try { writeSetting('watchdog_last_run', JSON.stringify({ at: Date.now(), error: res.error || null })) }
+  catch (e) { console.error('[db] watchdog_last_run:', e) }
+  return res
+}
+
+async function watchdogTick() {
+  try {
+    const schedules = readJsonSetting('watchdog_schedules', [])
+    if (!Array.isArray(schedules) || schedules.length === 0) return
+    const lastFired = readJsonSetting('watchdog_last_fired', {})
+    const now = new Date()
+
+    const due = []
+    for (const s of schedules) {
+      const occ = watchdog.dueOccurrence(s, now, WATCHDOG_GRACE_MS)
+      if (occ && occ.getTime() > (lastFired[s.id] || 0)) { due.push(s); lastFired[s.id] = occ.getTime() }
+    }
+    if (due.length === 0) return
+
+    // Persist before launching so a slow terminal can't cause a double fire on the next tick
+    writeSetting('watchdog_last_fired', JSON.stringify(lastFired))
+    const res = await fireWatchdog()
+    if (res.error) console.error('[watchdog]', res.error)
+  } catch (e) { console.error('[watchdog] tick:', e) }
+}
+
+function startWatchdog() {
+  watchdogTick()
+  setInterval(watchdogTick, WATCHDOG_TICK_MS)
+  powerMonitor.on('resume', watchdogTick)
+}
+
+ipcMain.handle('run-watchdog-now', () => fireWatchdog())
+
+ipcMain.handle('get-watchdog-status', () => {
+  const now = new Date()
+  const schedules = readJsonSetting('watchdog_schedules', [])
+  const nextRuns = {}
+  for (const s of Array.isArray(schedules) ? schedules : []) {
+    nextRuns[s.id] = watchdog.nextOccurrence(s, now)?.getTime() ?? null
+  }
+  return { nextRuns, lastRun: readJsonSetting('watchdog_last_run', null) }
+})
+
 // ── ICS parser ────────────────────────────────────────────────────────────────
 // ── RRULE expansion helpers ───────────────────────────────────────────────────
 
@@ -1455,6 +1522,7 @@ app.whenReady().then(() => {
 
   createWindow()
   scheduleDailyRefresh()
+  startWatchdog()
   powerMonitor.on('resume', () => {
     const today = new Date().toLocaleDateString('en-CA')
     if (today !== lastLoadDate && mainWindow) {
