@@ -202,9 +202,9 @@ export default function SettingsView({ alertMode, onAlertModeChange, theme, onTh
   }
 
   async function runWatchdogNow() {
-    setWdRunResult('Opening terminal…')
+    setWdRunResult('Sending…')
     const res = await window.tracker.runWatchdogNow()
-    setWdRunResult(res.error ?? 'Terminal opened')
+    setWdRunResult(res.error ?? 'Message sent')
     await refreshWatchdogStatus()
   }
 
@@ -804,7 +804,7 @@ export default function SettingsView({ alertMode, onAlertModeChange, theme, onTh
                   <button className="settings-save-btn" onClick={runWatchdogNow} disabled={!wdMessageSaved}>Run now</button>
                 </div>
                 <div className="settings-hint">
-                  At each scheduled time the app opens a terminal, sends this message to Claude Code, and closes the session after the reply — a timer for managing your Claude usage window.
+                  At each scheduled time the app sends this message to Claude Code in the background — a timer for managing your Claude usage window.
                   {wdRunResult && <> <strong>{wdRunResult}</strong></>}
                   {wdStatus?.lastRun && <> Last run: {new Date(wdStatus.lastRun.at).toLocaleString()}{wdStatus.lastRun.error ? ` (failed: ${wdStatus.lastRun.error})` : ''}.</>}
                 </div>

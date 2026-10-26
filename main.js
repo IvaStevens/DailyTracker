@@ -4,12 +4,11 @@ const fs       = require('fs')
 const zlib     = require('zlib')
 const http     = require('http')
 const https    = require('https')
-const os       = require('os')
-const { fork, spawn } = require('child_process')
+const { fork } = require('child_process')
 const Database = require('better-sqlite3')
-const watchdog = require('./watchdog-service')
+const watchdog = require('./watchdog-schedule')
 
-const STATE_DIR = path.join(__dirname, 'data')
+const STATE_DIR  = path.join(__dirname, 'data')
 const HIST_FILE  = path.join(STATE_DIR, 'history.json')
 const TODOS_FILE = path.join(STATE_DIR, 'todos.json')   // Slack sync inbox (read-only for app)
 const NOTES_FILE = path.join(STATE_DIR, 'notes.json')   // legacy — migrated on first run
@@ -788,6 +787,32 @@ function sentryCommand(type, params = {}) {
   })
 }
 
+// Forks claude-service.js once; sends typed messages; resolves by message id.
+// Every `claude` interaction (PR review, Sentry skills, watchdog) goes through here.
+let _claudeService = null
+let _claudeCallbacks = {}
+let _claudeNextId = 0
+
+function getClaudeService() {
+  if (_claudeService && !_claudeService.killed) return _claudeService
+  _claudeService = fork(path.join(__dirname, 'claude-service.js'))
+  _claudeService.on('message', (msg) => {
+    const cb = _claudeCallbacks[msg.id]
+    if (cb) { delete _claudeCallbacks[msg.id]; cb(msg) }
+  })
+  _claudeService.on('exit', () => { _claudeService = null })
+  return _claudeService
+}
+
+function claudeCommand(type, params = {}) {
+  return new Promise((resolve) => {
+    const id  = _claudeNextId++
+    const svc = getClaudeService()
+    _claudeCallbacks[id] = resolve
+    svc.send({ id, type, params })
+  })
+}
+
 function getSentryProjects() {
   try {
     const raw = readSetting('sentry_projects')
@@ -829,22 +854,6 @@ ipcMain.handle('open-sentry-issue', async (_, tag) => {
   await sentryCommand('issue-open', { tag })
   return {}
 })
-
-// Resolve `claude` binary path once from the login shell so Electron finds it
-// regardless of how the app was launched (Dock, Finder, etc.)
-let _claudePath = null
-function getClaudePath() {
-  return new Promise((resolve) => {
-    if (_claudePath) return resolve(_claudePath)
-    const proc = spawn('/bin/zsh', ['-lc', 'which claude'], {
-      env: { ...process.env, HOME: os.homedir() },
-    })
-    let out = ''
-    proc.stdout.on('data', d => { out += d })
-    proc.on('close', () => { _claudePath = out.trim() || 'claude'; resolve(_claudePath) })
-    proc.on('error', () => { _claudePath = 'claude'; resolve(_claudePath) })
-  })
-}
 
 ipcMain.handle('fetch-github', async () => {
   const { domain } = getJiraCreds()
@@ -1103,60 +1112,31 @@ ipcMain.handle('run-pr-review', async (_e, prUrl, jiraKey) => {
   const skill = readSetting('review_skill').trim()
   if (!skill) return { error: 'No review skill configured — add one in Settings.' }
 
-  const claudeExec = await getClaudePath()
+  const res = await claudeCommand('run-prompt', { prompt: `${skill}\n\n${diff}` })
+  if (res.error) return { error: res.error }
+  const text = res.data
 
-  return new Promise((resolve) => {
-    const proc = spawn(claudeExec, ['-p', `${skill}\n\n${diff}`], {
-      env: { ...process.env, HOME: os.homedir() },
-      cwd: os.homedir(),
-    })
+  try {
+    db.prepare(
+      'INSERT OR REPLACE INTO pr_reviews (pr_url, jira_key, review, created) VALUES (?, ?, ?, unixepoch())'
+    ).run(prUrl, jiraKey || '', text)
+  } catch (e) { console.error('[db] store review:', e) }
 
-    let out = ''
-    let err = ''
-    proc.stdout.on('data', d => { out += d })
-    proc.stderr.on('data', d => { err += d })
-
-    proc.on('close', code => {
-      const text = out.trim()
-      if (!text) return resolve({ error: err.trim() || `claude exited with code ${code}` })
-
-      try {
-        db.prepare(
-          'INSERT OR REPLACE INTO pr_reviews (pr_url, jira_key, review, created) VALUES (?, ?, ?, unixepoch())'
-        ).run(prUrl, jiraKey || '', text)
-      } catch (e) { console.error('[db] store review:', e) }
-
-      resolve({ review: text })
-    })
-
-    proc.on('error', e => resolve({ error: `Failed to launch claude: ${e.message}` }))
-  })
+  return { review: text }
 })
 
 ipcMain.handle('run-sentry-skill', async (_e, tag, skillName, command) => {
   if (!tag || !command) return { error: 'tag and command required' }
-  const claudeExec = await getClaudePath()
-  return new Promise((resolve) => {
-    const proc = spawn(claudeExec, ['-p', `/${command} ${tag}`], {
-      env: { ...process.env, HOME: os.homedir() },
-      cwd: os.homedir(),
-    })
-    let out = ''
-    let err = ''
-    proc.stdout.on('data', d => { out += d })
-    proc.stderr.on('data', d => { err += d })
-    proc.on('close', code => {
-      const text = out.trim()
-      if (!text) return resolve({ error: err.trim() || `claude exited with code ${code}` })
-      try {
-        db.prepare(
-          'INSERT OR REPLACE INTO sentry_skill_runs (issue_tag, skill_name, output, created) VALUES (?, ?, ?, unixepoch())'
-        ).run(tag, skillName, text)
-      } catch (e) { console.error('[db] store sentry skill run:', e) }
-      resolve({ output: text })
-    })
-    proc.on('error', e => resolve({ error: `Failed to launch claude: ${e.message}` }))
-  })
+  const res = await claudeCommand('run-prompt', { prompt: `/${command} ${tag}` })
+  if (res.error) return { error: res.error }
+  const text = res.data
+
+  try {
+    db.prepare(
+      'INSERT OR REPLACE INTO sentry_skill_runs (issue_tag, skill_name, output, created) VALUES (?, ?, ?, unixepoch())'
+    ).run(tag, skillName, text)
+  } catch (e) { console.error('[db] store sentry skill run:', e) }
+  return { output: text }
 })
 
 ipcMain.handle('get-sentry-skill-runs', (_e, tag) => {
@@ -1169,8 +1149,8 @@ ipcMain.handle('get-sentry-skill-runs', (_e, tag) => {
 })
 
 // ── Claude watchdog ───────────────────────────────────────────────────────────
-// Opens a terminal on a user-defined schedule, sends the configured message to
-// Claude Code, and lets the session end. Message and schedules live in settings.
+// Sends the configured message to Claude Code (headless) on a user-defined schedule.
+// Message and schedules live in settings.
 const WATCHDOG_TICK_MS  = 30 * 1000
 const WATCHDOG_GRACE_MS = 15 * 60 * 1000   // still fire if the app was asleep/busy at the exact minute
 
@@ -1188,11 +1168,10 @@ function writeSetting(key, value) {
 async function fireWatchdog() {
   const message = readSetting('watchdog_message').trim()
   if (!message) return { error: 'No watchdog message configured — add one in Settings.' }
-  const claudeExec = await getClaudePath()
-  const res = await watchdog.launchClaudeInTerminal(claudeExec, message)
+  const res = await claudeCommand('run-prompt', { prompt: message })
   try { writeSetting('watchdog_last_run', JSON.stringify({ at: Date.now(), error: res.error || null })) }
   catch (e) { console.error('[db] watchdog_last_run:', e) }
-  return res
+  return { error: res.error }
 }
 
 async function watchdogTick() {
