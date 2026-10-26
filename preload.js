@@ -27,4 +27,6 @@ contextBridge.exposeInMainWorld('tracker', {
   getSetting:      (key)                 => ipcRenderer.invoke('get-setting', key),
   setSetting:      (key, value)          => ipcRenderer.invoke('set-setting', key, value),
   archivePastDone: (todayStr)            => ipcRenderer.invoke('archive-past-done', todayStr),
+  runWatchdogNow:      ()                => ipcRenderer.invoke('run-watchdog-now'),
+  getWatchdogStatus:   ()                => ipcRenderer.invoke('get-watchdog-status'),
 })

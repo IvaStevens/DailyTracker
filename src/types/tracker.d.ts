@@ -95,7 +95,25 @@ export interface IssueDetail {
   tags:      { key: string; value: string }[]
 }
 
-export type AlertMode = 'alarm' | 'flash' | 'none'
+export type WatchdogRepeat = 'daily' | 'weekly' | 'monthly' | 'yearly'
+
+export interface WatchdogSchedule {
+  id:         string
+  enabled:    boolean
+  created:    number            // ms; occurrences before this are ignored
+  time:       string            // 'HH:MM', local time
+  repeat:     WatchdogRepeat
+  weekdays:   number[]          // weekly: 0 = Sunday … 6 = Saturday
+  dayOfMonth: number            // monthly / yearly
+  month:      number            // yearly: 1–12
+}
+
+export interface WatchdogStatus {
+  nextRuns: Record<string, number | null>
+  lastRun:  { at: number; error: string | null } | null
+}
+
+export type AlertMode ='alarm' | 'flash' | 'none'
 export type TabId    = 'today' | 'calendar' | 'jira' | 'github' | 'sentry' | 'notes' | 'settings'
 export type ThemeId  = 'default' | 'ocean' | 'terminal' | 'coastal'
 
@@ -137,6 +155,8 @@ declare global {
       getSetting:           (key: string)                  => Promise<string | null>
       setSetting:           (key: string, value: string)   => Promise<boolean>
       archivePastDone:      (todayStr: string)             => Promise<boolean>
+      runWatchdogNow:       ()                             => Promise<{ error?: string }>
+      getWatchdogStatus:    ()                             => Promise<WatchdogStatus>
     }
   }
 }

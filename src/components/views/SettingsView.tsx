@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import type { AlertMode, ThemeId, SentryPreset, SentrySkill, JiraFilter } from '../../types/tracker'
+import type { AlertMode, ThemeId, SentryPreset, SentrySkill, JiraFilter, WatchdogSchedule, WatchdogRepeat, WatchdogStatus } from '../../types/tracker'
 
 interface IcsCalendar {
   url:      string
@@ -20,15 +20,45 @@ const THEMES: { id: ThemeId; label: string; swatches: string[] }[] = [
   { id: 'coastal',  label: 'Coastal',  swatches: ['#031624', '#7bbfe0', '#ff7744', '#44dd80'] },
 ]
 
-type SettingsTab = 'github' | 'jira' | 'sentry' | 'appearance' | 'calendars'
+type SettingsTab = 'github' | 'jira' | 'sentry' | 'watchdog' | 'appearance' | 'calendars'
 
 const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: 'github',     label: 'GitHub' },
   { id: 'jira',       label: 'Jira'            },
   { id: 'sentry',     label: 'Sentry'          },
+  { id: 'watchdog',   label: 'Watchdog'        },
   { id: 'appearance', label: 'Display' },
   { id: 'calendars',  label: 'Calendars'       },
 ]
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const MONTHS   = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+function ordinal(n: number) {
+  const v = n % 100
+  if (v >= 11 && v <= 13) return `${n}th`
+  return `${n}${({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th'}`
+}
+
+function formatTime(hhmm: string) {
+  const [h, m] = hhmm.split(':').map(Number)
+  return new Date(2000, 0, 1, h, m).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+function describeSchedule(s: WatchdogSchedule) {
+  const at = formatTime(s.time)
+  switch (s.repeat) {
+    case 'daily':   return `Every day at ${at}`
+    case 'weekly':  return `Every ${s.weekdays.map(d => WEEKDAYS[d]).join(', ')} at ${at}`
+    case 'monthly': return `The ${ordinal(s.dayOfMonth)} of every month at ${at}`
+    case 'yearly':  return `Every ${MONTHS[s.month - 1]} ${ordinal(s.dayOfMonth)} at ${at}`
+  }
+}
+
+function formatNextRun(ms: number | null | undefined) {
+  if (!ms) return 'no upcoming run'
+  return new Date(ms).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
 
 export default function SettingsView({ alertMode, onAlertModeChange, theme, onThemeChange }: Props) {
   const [activeTab,        setActiveTab]        = useState<SettingsTab>('github')
@@ -60,6 +90,16 @@ export default function SettingsView({ alertMode, onAlertModeChange, theme, onTh
   const [editFilterUrl,    setEditFilterUrl]    = useState('')
   const [reviewSkill,      setReviewSkill]      = useState('')
   const [skillSaved,       setSkillSaved]       = useState(false)
+  const [wdMessage,        setWdMessage]        = useState('')
+  const [wdMessageSaved,   setWdMessageSaved]   = useState(false)
+  const [wdSchedules,      setWdSchedules]      = useState<WatchdogSchedule[]>([])
+  const [wdStatus,         setWdStatus]         = useState<WatchdogStatus | null>(null)
+  const [wdRunResult,      setWdRunResult]      = useState('')
+  const [newWdRepeat,      setNewWdRepeat]      = useState<WatchdogRepeat>('daily')
+  const [newWdTime,        setNewWdTime]        = useState('09:00')
+  const [newWdWeekdays,    setNewWdWeekdays]    = useState<number[]>([1])
+  const [newWdDay,         setNewWdDay]         = useState(1)
+  const [newWdMonth,       setNewWdMonth]       = useState(1)
 
   useEffect(() => {
     window.tracker.getSetting('ics_calendars').then(async v => {
@@ -95,6 +135,17 @@ export default function SettingsView({ alertMode, onAlertModeChange, theme, onTh
     window.tracker.getSetting('review_skill').then(v => {
       if (v) { setReviewSkill(v); setSkillSaved(true) }
     })
+    window.tracker.getSetting('watchdog_message').then(v => {
+      if (v) { setWdMessage(v); setWdMessageSaved(true) }
+    })
+    window.tracker.getSetting('watchdog_schedules').then(v => {
+      if (!v) return
+      try {
+        const parsed = JSON.parse(v)
+        if (Array.isArray(parsed)) setWdSchedules(parsed)
+      } catch {}
+    })
+    refreshWatchdogStatus()
     window.tracker.getSetting('sentry_projects').then(v => {
       if (!v) return
       try {
@@ -132,6 +183,61 @@ export default function SettingsView({ alertMode, onAlertModeChange, theme, onTh
       window.tracker.setSetting('github_repos', JSON.stringify(migrated))
     })
   }, [])
+
+  // ── Watchdog handlers ────────────────────────────────────────────────────
+  async function refreshWatchdogStatus() {
+    setWdStatus(await window.tracker.getWatchdogStatus())
+  }
+
+  async function saveWatchdogSchedules(next: WatchdogSchedule[]) {
+    setWdSchedules(next)
+    await window.tracker.setSetting('watchdog_schedules', JSON.stringify(next))
+    await refreshWatchdogStatus()
+  }
+
+  async function saveWatchdogMessage() {
+    const val = wdMessage.trim()
+    await window.tracker.setSetting('watchdog_message', val)
+    setWdMessageSaved(!!val)
+  }
+
+  async function runWatchdogNow() {
+    setWdRunResult('Sending…')
+    const res = await window.tracker.runWatchdogNow()
+    setWdRunResult(res.error ?? 'Message sent')
+    await refreshWatchdogStatus()
+  }
+
+  async function addWatchdogSchedule() {
+    if (!/^\d{1,2}:\d{2}$/.test(newWdTime)) { alert('Pick a time of day'); return }
+    if (newWdRepeat === 'weekly' && newWdWeekdays.length === 0) { alert('Pick at least one day of the week'); return }
+    const day = Math.min(31, Math.max(1, Math.round(newWdDay) || 1))
+    const next: WatchdogSchedule[] = [...wdSchedules, {
+      id:         `${Date.now()}`,
+      enabled:    true,
+      created:    Date.now(),
+      time:       newWdTime,
+      repeat:     newWdRepeat,
+      weekdays:   [...newWdWeekdays].sort(),
+      dayOfMonth: day,
+      month:      newWdMonth,
+    }]
+    await saveWatchdogSchedules(next)
+  }
+
+  async function toggleWatchdogSchedule(id: string) {
+    // Re-stamp `created` on enable so a time that already passed today doesn't fire retroactively
+    await saveWatchdogSchedules(wdSchedules.map(s =>
+      s.id === id ? { ...s, enabled: !s.enabled, created: Date.now() } : s))
+  }
+
+  async function removeWatchdogSchedule(id: string) {
+    await saveWatchdogSchedules(wdSchedules.filter(s => s.id !== id))
+  }
+
+  function toggleNewWdWeekday(d: number) {
+    setNewWdWeekdays(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d])
+  }
 
   // ── Calendar handlers ────────────────────────────────────────────────────
   async function addCalendar() {
@@ -673,6 +779,126 @@ export default function SettingsView({ alertMode, onAlertModeChange, theme, onTh
                   spellCheck={false}
                 />
                 <button className="settings-save-btn" onClick={addSentrySkill}>Add</button>
+              </div>
+            </div>
+          </>}
+
+          {/* ── Watchdog ── */}
+          {activeTab === 'watchdog' && <>
+            <div className="settings-section">
+              <div className="settings-section-title">Claude Watchdog</div>
+              <div className="settings-row">
+                <label className="settings-label">Message</label>
+                <div className="settings-input-row">
+                  <input
+                    className={`settings-input${wdMessageSaved ? ' saved' : ''}`}
+                    type="text"
+                    placeholder="Message to send to Claude"
+                    value={wdMessage}
+                    onChange={e => { setWdMessage(e.target.value); setWdMessageSaved(false) }}
+                    onKeyDown={e => { if (e.key === 'Enter') saveWatchdogMessage() }}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <button className="settings-save-btn" onClick={saveWatchdogMessage}>Save</button>
+                  <button className="settings-save-btn" onClick={runWatchdogNow} disabled={!wdMessageSaved}>Run now</button>
+                </div>
+                <div className="settings-hint">
+                  At each scheduled time the app sends this message to Claude Code in the background — a timer for managing your Claude usage window.
+                  {wdRunResult && <> <strong>{wdRunResult}</strong></>}
+                  {wdStatus?.lastRun && <> Last run: {new Date(wdStatus.lastRun.at).toLocaleString()}{wdStatus.lastRun.error ? ` (failed: ${wdStatus.lastRun.error})` : ''}.</>}
+                </div>
+              </div>
+            </div>
+
+            <div className="settings-section">
+              <div className="settings-section-title">Schedule</div>
+
+              {wdSchedules.length > 0 && (
+                <div className="sentry-preset-list">
+                  {wdSchedules.map(s => (
+                    <div key={s.id} className="sentry-preset-row">
+                      <input
+                        type="checkbox"
+                        className="sentry-preset-radio"
+                        checked={s.enabled}
+                        onChange={() => toggleWatchdogSchedule(s.id)}
+                        aria-label="Enabled"
+                      />
+                      <div className="sentry-preset-info">
+                        <span className="sentry-preset-name">{describeSchedule(s)}</span>
+                        <span className="sentry-preset-flags">
+                          {s.enabled ? `Next: ${formatNextRun(wdStatus?.nextRuns[s.id])}` : 'Disabled'}
+                        </span>
+                      </div>
+                      <button
+                        className="sentry-preset-remove"
+                        onClick={() => removeWatchdogSchedule(s.id)}
+                        aria-label="Remove schedule"
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="watchdog-add">
+                <select
+                  className="sentry-preset-select"
+                  value={newWdRepeat}
+                  onChange={e => setNewWdRepeat(e.target.value as WatchdogRepeat)}
+                >
+                  <option value="daily">Every day</option>
+                  <option value="weekly">Weekly, on days…</option>
+                  <option value="monthly">Monthly, on a date…</option>
+                  <option value="yearly">Yearly, on a date…</option>
+                </select>
+
+                {newWdRepeat === 'weekly' && (
+                  <div className="watchdog-days">
+                    {WEEKDAYS.map((label, d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        className={`watchdog-day${newWdWeekdays.includes(d) ? ' active' : ''}`}
+                        onClick={() => toggleNewWdWeekday(d)}
+                      >{label}</button>
+                    ))}
+                  </div>
+                )}
+
+                {newWdRepeat === 'yearly' && (
+                  <select
+                    className="sentry-preset-select"
+                    value={newWdMonth}
+                    onChange={e => setNewWdMonth(Number(e.target.value))}
+                  >
+                    {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                  </select>
+                )}
+
+                {(newWdRepeat === 'monthly' || newWdRepeat === 'yearly') && (
+                  <input
+                    className="settings-input watchdog-day-input"
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={newWdDay}
+                    onChange={e => setNewWdDay(Number(e.target.value))}
+                    aria-label="Day of month"
+                  />
+                )}
+
+                <input
+                  className="settings-input watchdog-time-input"
+                  type="time"
+                  value={newWdTime}
+                  onChange={e => setNewWdTime(e.target.value)}
+                  aria-label="Time of day"
+                />
+                <button className="settings-save-btn" onClick={addWatchdogSchedule}>Add</button>
+              </div>
+              <div className="settings-hint">
+                Times are local. On a day that doesn't exist (e.g. the 31st in a 30-day month) the run happens on the month's last day. The app must be running — a run missed by more than 15 minutes is skipped.
               </div>
             </div>
           </>}
