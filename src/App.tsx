@@ -8,7 +8,9 @@ import JiraView from './components/views/JiraView'
 import GithubView from './components/views/GithubView'
 import SentryView from './components/views/SentryView'
 import NotesView from './components/views/NotesView'
+import MarkdownView from './components/views/MarkdownView'
 import SettingsView from './components/views/SettingsView'
+import { TABS } from './components/tabs'
 import type { Todo, Meeting, HistoryDay, AlertMode, TabId, ThemeId } from './types/tracker'
 
 const TODAY_STR = new Date().toLocaleDateString('en-CA')
@@ -21,6 +23,7 @@ export default function App() {
   const [calHistory,  setCalHistory]  = useState<Record<string, HistoryDay>>({})
   const [alertMode,   setAlertMode]   = useState<AlertMode>('alarm')
   const [theme,       setTheme]       = useState<ThemeId>('default')
+  const [hiddenTabs,  setHiddenTabs]  = useState<TabId[]>([])
   const [syncVisible, setSyncVisible] = useState(false)
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -35,6 +38,11 @@ export default function App() {
         setTheme(savedTheme as ThemeId)
         document.documentElement.setAttribute('data-theme', savedTheme)
       }
+
+      try {
+        const savedHidden = await window.tracker.getSetting('hidden_tabs')
+        if (savedHidden) setHiddenTabs(JSON.parse(savedHidden) as TabId[])
+      } catch (_) { /* malformed setting — show every tab */ }
 
       await window.tracker.archivePastDone(TODAY_STR)
 
@@ -131,6 +139,17 @@ export default function App() {
     await window.tracker.setSetting('meeting_alert_mode', mode)
   }, [])
 
+  const handleHiddenTabsChange = useCallback(async (hidden: TabId[]) => {
+    setHiddenTabs(hidden)
+    await window.tracker.setSetting('hidden_tabs', JSON.stringify(hidden))
+  }, [])
+
+  // If the active tab gets hidden, fall back to the first one still visible
+  useEffect(() => {
+    const visible = TABS.filter(t => t.locked || !hiddenTabs.includes(t.id))
+    if (!visible.some(t => t.id === currentTab)) setCurrentTab(visible[0].id)
+  }, [hiddenTabs, currentTab])
+
   const handleThemeChange = useCallback(async (t: ThemeId) => {
     setTheme(t)
     document.documentElement.setAttribute('data-theme', t)
@@ -142,7 +161,7 @@ export default function App() {
       <AppHeader />
       <div className="frame-body">
         <div className="frame-left">
-          <TabBar current={currentTab} onChange={setCurrentTab} />
+          <TabBar current={currentTab} hiddenTabs={hiddenTabs} onChange={setCurrentTab} />
         </div>
         <div className="frame-content">
           {currentTab === 'today' && (
@@ -174,12 +193,15 @@ export default function App() {
               onUpdateNote={handleUpdateNote}
             />
           )}
+          {currentTab === 'markdown' && <MarkdownView />}
           {currentTab === 'settings' && (
             <SettingsView
               alertMode={alertMode}
               onAlertModeChange={handleAlertModeChange}
               theme={theme}
               onThemeChange={handleThemeChange}
+              hiddenTabs={hiddenTabs}
+              onHiddenTabsChange={handleHiddenTabsChange}
             />
           )}
           {syncVisible && <div id="sync-toast" className="show">Synced</div>}

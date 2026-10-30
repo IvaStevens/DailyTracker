@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import type { AlertMode, ThemeId, SentryPreset, SentrySkill, JiraFilter, WatchdogSchedule, WatchdogRepeat, WatchdogStatus } from '../../types/tracker'
+import { TABS } from '../tabs'
+import type { AlertMode, ThemeId, TabId, SentryPreset, SentrySkill, JiraFilter, WatchdogSchedule, WatchdogRepeat, WatchdogStatus } from '../../types/tracker'
 
 interface IcsCalendar {
   url:      string
@@ -11,6 +12,8 @@ interface Props {
   onAlertModeChange: (mode: AlertMode) => void
   theme:             ThemeId
   onThemeChange:     (t: ThemeId) => void
+  hiddenTabs:         TabId[]
+  onHiddenTabsChange: (hidden: TabId[]) => void
 }
 
 const THEMES: { id: ThemeId; label: string; swatches: string[] }[] = [
@@ -60,7 +63,7 @@ function formatNextRun(ms: number | null | undefined) {
   return new Date(ms).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
-export default function SettingsView({ alertMode, onAlertModeChange, theme, onThemeChange }: Props) {
+export default function SettingsView({ alertMode, onAlertModeChange, theme, onThemeChange, hiddenTabs, onHiddenTabsChange }: Props) {
   const [activeTab,        setActiveTab]        = useState<SettingsTab>('github')
   const [calendars,        setCalendars]        = useState<IcsCalendar[]>([])
   const [newUrl,           setNewUrl]           = useState('')
@@ -923,6 +926,30 @@ export default function SettingsView({ alertMode, onAlertModeChange, theme, onTh
                       </div>
                       <span className="settings-theme-label">{t.label}</span>
                     </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="settings-section">
+              <div className="settings-section-title">Sidebar Tabs</div>
+              <div className="settings-row">
+                <label className="settings-label">Show these tabs</label>
+                <div className="settings-check-list">
+                  {TABS.map(t => (
+                    <label key={t.id} className={`settings-check-label${t.locked ? ' locked' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={t.locked || !hiddenTabs.includes(t.id)}
+                        disabled={t.locked}
+                        onChange={e => onHiddenTabsChange(
+                          e.target.checked ? hiddenTabs.filter(id => id !== t.id) : [...hiddenTabs, t.id]
+                        )}
+                      />
+                      <t.Icon size={18} color="currentColor" />
+                      <span>{t.label}</span>
+                      {t.locked && <span className="settings-check-note">always shown</span>}
+                    </label>
                   ))}
                 </div>
               </div>

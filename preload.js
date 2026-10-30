@@ -29,4 +29,9 @@ contextBridge.exposeInMainWorld('tracker', {
   archivePastDone: (todayStr)            => ipcRenderer.invoke('archive-past-done', todayStr),
   runWatchdogNow:      ()                => ipcRenderer.invoke('run-watchdog-now'),
   getWatchdogStatus:   ()                => ipcRenderer.invoke('get-watchdog-status'),
+  mdGetRoot:       ()                    => ipcRenderer.invoke('md-get-root'),
+  mdChooseRoot:    ()                    => ipcRenderer.invoke('md-choose-root'),
+  mdListDir:       (dir)                 => ipcRenderer.invoke('md-list-dir', dir),
+  mdReadFile:      (file)                => ipcRenderer.invoke('md-read-file', file),
+  mdWriteFile:     (file, content, expectedMtime, force) => ipcRenderer.invoke('md-write-file', file, content, expectedMtime, force),
 })
