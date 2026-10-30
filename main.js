@@ -1,6 +1,7 @@
-const { app, BrowserWindow, ipcMain, shell, powerMonitor, nativeImage, safeStorage } = require('electron')
+const { app, BrowserWindow, ipcMain, shell, powerMonitor, nativeImage, safeStorage, dialog } = require('electron')
 const path     = require('path')
 const fs       = require('fs')
+const os       = require('os')
 const zlib     = require('zlib')
 const http     = require('http')
 const https    = require('https')
@@ -384,6 +385,7 @@ function createWindow() {
     titleBarStyle:   'hiddenInset',
     backgroundColor: '#12101e',
     vibrancy:        'under-window',
+    icon:            path.join(__dirname, 'assets', 'icon.png'),
     webPreferences: {
       preload:          path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -562,6 +564,83 @@ ipcMain.handle('set-setting', (_e, key, value) => {
     db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, stored)
     return true
   } catch (e) { console.error('[db] set-setting:', e); return false }
+})
+
+// ── Markdown files ────────────────────────────────────────────────────────────
+// The renderer may only touch markdown files inside the configured root folder.
+const MD_EXT       = /\.(md|markdown|mdx)$/i
+const MD_MAX_BYTES = 2 * 1024 * 1024
+const MD_SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'coverage'])
+
+function mdRoot() {
+  const saved = readSetting('markdown_root')
+  const root  = saved && fs.existsSync(saved) ? saved : os.homedir()
+  return fs.realpathSync(root)
+}
+
+function resolveMdPath(p) {
+  const root = mdRoot()
+  const real = fs.realpathSync(path.resolve(String(p)))
+  if (real !== root && !real.startsWith(root + path.sep)) throw new Error('Path is outside the markdown folder')
+  return real
+}
+
+ipcMain.handle('md-get-root', () => {
+  try { return { root: mdRoot() } }
+  catch (e) { return { error: e.message } }
+})
+
+ipcMain.handle('md-choose-root', async () => {
+  const res = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose markdown folder',
+    defaultPath: mdRoot(),
+    properties: ['openDirectory'],
+  })
+  if (res.canceled || !res.filePaths[0]) return { canceled: true }
+  try {
+    writeSetting('markdown_root', res.filePaths[0])
+    return { root: mdRoot() }
+  } catch (e) { return { error: e.message } }
+})
+
+ipcMain.handle('md-list-dir', (_e, dir) => {
+  try {
+    const real    = resolveMdPath(dir)
+    const entries = []
+    for (const d of fs.readdirSync(real, { withFileTypes: true })) {
+      if (d.name.startsWith('.')) continue
+      const full = path.join(real, d.name)
+      let isDir = d.isDirectory(), isFile = d.isFile()
+      if (d.isSymbolicLink()) {
+        try { const st = fs.statSync(full); isDir = st.isDirectory(); isFile = st.isFile() } catch (_) { continue }
+      }
+      if (isDir && !MD_SKIP_DIRS.has(d.name)) entries.push({ name: d.name, path: full, isDir: true })
+      else if (isFile && MD_EXT.test(d.name)) entries.push({ name: d.name, path: full, isDir: false })
+    }
+    entries.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1))
+    return { entries }
+  } catch (e) { return { error: e.message } }
+})
+
+ipcMain.handle('md-read-file', (_e, file) => {
+  try {
+    const real = resolveMdPath(file)
+    if (!MD_EXT.test(real)) return { error: 'Not a markdown file' }
+    const st = fs.statSync(real)
+    if (st.size > MD_MAX_BYTES) return { error: 'File is larger than 2 MB' }
+    return { path: real, content: fs.readFileSync(real, 'utf8'), mtimeMs: st.mtimeMs }
+  } catch (e) { return { error: e.message } }
+})
+
+// expectedMtime guards against clobbering a file that changed on disk since it was opened
+ipcMain.handle('md-write-file', (_e, file, content, expectedMtime, force) => {
+  try {
+    const real = resolveMdPath(file)
+    if (!MD_EXT.test(real)) return { error: 'Not a markdown file' }
+    if (!force && expectedMtime != null && fs.statSync(real).mtimeMs !== expectedMtime) return { conflict: true }
+    fs.writeFileSync(real, String(content), 'utf8')
+    return { mtimeMs: fs.statSync(real).mtimeMs }
+  } catch (e) { return { error: e.message } }
 })
 
 function fetchICSUrl(url, startStr, endStr) {
@@ -1501,7 +1580,9 @@ app.whenReady().then(() => {
 
   createWindow()
   scheduleDailyRefresh()
-  startWatchdog()
+  // The packaged-style instance owns the schedule; a second `npm run dev` instance
+  // sharing the same DB would fire every watchdog run twice.
+  if (process.env.NODE_ENV !== 'development') startWatchdog()
   powerMonitor.on('resume', () => {
     const today = new Date().toLocaleDateString('en-CA')
     if (today !== lastLoadDate && mainWindow) {

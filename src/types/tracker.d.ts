@@ -114,8 +114,14 @@ export interface WatchdogStatus {
 }
 
 export type AlertMode ='alarm' | 'flash' | 'none'
-export type TabId    = 'today' | 'calendar' | 'jira' | 'github' | 'sentry' | 'notes' | 'settings'
+export type TabId    = 'today' | 'calendar' | 'jira' | 'github' | 'sentry' | 'notes' | 'markdown' | 'settings'
 export type ThemeId  = 'default' | 'ocean' | 'terminal' | 'coastal'
+
+export interface MdEntry {
+  name:  string
+  path:  string
+  isDir: boolean
+}
 
 export interface ReviewIssue {
   id:          string
@@ -157,6 +163,11 @@ declare global {
       archivePastDone:      (todayStr: string)             => Promise<boolean>
       runWatchdogNow:       ()                             => Promise<{ error?: string }>
       getWatchdogStatus:    ()                             => Promise<WatchdogStatus>
+      mdGetRoot:            ()                             => Promise<{ root?: string; error?: string }>
+      mdChooseRoot:         ()                             => Promise<{ root?: string; canceled?: boolean; error?: string }>
+      mdListDir:            (dir: string)                  => Promise<{ entries?: MdEntry[]; error?: string }>
+      mdReadFile:           (file: string)                 => Promise<{ path?: string; content?: string; mtimeMs?: number; error?: string }>
+      mdWriteFile:          (file: string, content: string, expectedMtime?: number, force?: boolean) => Promise<{ mtimeMs?: number; conflict?: boolean; error?: string }>
     }
   }
 }

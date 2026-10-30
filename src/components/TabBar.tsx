@@ -1,33 +1,18 @@
 import React from 'react'
 import Nav from 'react-bootstrap/Nav'
-import { CheckCircle, Calendar, Ticket, Github, AlertTriangle, StickyNote, Settings } from 'griddy-icons'
+import { TABS } from './tabs'
 import type { TabId } from '../types/tracker'
 
-interface Tab {
-  id:    TabId
-  label: string
-  Icon:  React.ComponentType<{ size?: number | string; color?: string }>
-}
-
-const TABS: Tab[] = [
-  { id: 'today',    label: 'Today',    Icon: CheckCircle },
-  { id: 'calendar', label: 'Calendar', Icon: Calendar    },
-  { id: 'jira',     label: 'Jira',     Icon: Ticket      },
-  { id: 'github',   label: 'GitHub',   Icon: Github        },
-  { id: 'sentry',   label: 'Sentry',   Icon: AlertTriangle },
-  { id: 'notes',    label: 'Notes',    Icon: StickyNote    },
-  { id: 'settings', label: 'Settings', Icon: Settings    },
-]
-
 interface Props {
-  current:  TabId
-  onChange: (tab: TabId) => void
+  current:    TabId
+  hiddenTabs: TabId[]
+  onChange:   (tab: TabId) => void
 }
 
-export default function TabBar({ current, onChange }: Props) {
+export default function TabBar({ current, hiddenTabs, onChange }: Props) {
   return (
     <Nav className="app-tabs" role="tablist">
-      {TABS.map(({ id, label, Icon }) => (
+      {TABS.filter(t => t.locked || !hiddenTabs.includes(t.id)).map(({ id, label, Icon }) => (
         <Nav.Item key={id}>
           <Nav.Link
             as="button"
